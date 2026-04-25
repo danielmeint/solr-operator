@@ -491,18 +491,20 @@ func callSolrApiInPod(ctx context.Context, solrCloud *solrv1beta1.SolrCloud, htt
 	}
 	GinkgoLogr.Info(toolOpts)
 
-	command := []string{
-		"solr",
-		"api",
-		"-verbose",
-		"-" + strings.ToLower(httpMethod),
-		fmt.Sprintf(
-			"\"%s://%s%s%s%s\"",
-			solrCloud.UrlScheme(false),
-			hostname,
-			solrCloud.NodePortSuffix(false),
-			apiPath,
-			queryParamsString),
+	solrUrl := fmt.Sprintf(
+		"\"%s://%s%s%s%s\"",
+		solrCloud.UrlScheme(false),
+		hostname,
+		solrCloud.NodePortSuffix(false),
+		apiPath,
+		queryParamsString)
+
+	var command []string
+	if util.IsSolr10OrLater(strings.Split(solrImage+":", ":")[1]) {
+		// Solr 10+ uses a different CLI syntax: solr api -s <url> -v
+		command = []string{"solr", "api", "--solr-url", solrUrl, "-v"}
+	} else {
+		command = []string{"solr", "api", "-verbose", "-" + strings.ToLower(httpMethod), solrUrl}
 	}
 	if toolOpts != "" {
 		commandString := fmt.Sprintf("%s %s", toolOpts, strings.Join(command, " "))

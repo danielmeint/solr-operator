@@ -71,6 +71,9 @@ const (
 	DistLibs              = "/opt/solr/dist"
 	ContribLibs           = "/opt/solr/contrib/%s/lib"
 	SysPropLibPlaceholder = "${solr.sharedLib:}"
+
+	// Solr version threshold for Solr 10+ incompatible changes
+	Solr10MajorVersion = 10
 )
 
 var (
@@ -79,6 +82,34 @@ var (
 	DefaultSolrZKPrepInitContainerMemory     = resource.NewScaledQuantity(200, 6)
 	DefaultSolrZKPrepInitContainerCPU        = resource.NewMilliQuantity(400, resource.DecimalExponent)
 )
+
+// SolrMajorVersion extracts the major version number from a Solr image tag.
+// Returns 0 if the tag cannot be parsed (e.g. "latest", "nightly", custom tags).
+func SolrMajorVersion(imageTag string) int {
+	// Strip common prefixes like "v" if present
+	tag := strings.TrimPrefix(imageTag, "v")
+	// Take the first segment before any "-" (e.g. "10.0.0-SNAPSHOT" -> "10.0.0")
+	if idx := strings.Index(tag, "-"); idx >= 0 {
+		tag = tag[:idx]
+	}
+	// Take the major version (first segment before ".")
+	major := tag
+	if idx := strings.Index(tag, "."); idx >= 0 {
+		major = tag[:idx]
+	}
+	v, err := strconv.Atoi(major)
+	if err != nil {
+		return 0
+	}
+	return v
+}
+
+// IsSolr10OrLater returns true if the given image tag represents Solr 10.0 or later.
+// Returns false for unparseable tags (e.g. "latest") — callers should treat unknown versions
+// as pre-10 for backwards compatibility.
+func IsSolr10OrLater(imageTag string) bool {
+	return SolrMajorVersion(imageTag) >= Solr10MajorVersion
+}
 
 // GenerateStatefulSet returns a new appsv1.StatefulSet pointer generated for the SolrCloud instance
 // object: SolrCloud instance
@@ -148,9 +179,15 @@ func GenerateStatefulSet(solrCloud *solr.SolrCloud, solrCloudStatus *solr.SolrCl
 		},
 	}
 
+	isSolr10 := IsSolr10OrLater(solrCloud.Spec.SolrImage.Tag)
+
 	// Keep track of the SolrOpts that the Solr Operator needs to set
 	// These will be added to the SolrOpts given by the user.
-	allSolrOpts := []string{"-DhostPort=$(SOLR_NODE_PORT)"}
+	allSolrOpts := []string{}
+	if !isSolr10 {
+		// The hostPort sysprop is only needed for Solr 9 and earlier
+		allSolrOpts = append(allSolrOpts, "-DhostPort=$(SOLR_NODE_PORT)")
+	}
 
 	// Volumes & Mounts
 	solrVolumes := []corev1.Volume{
@@ -377,19 +414,43 @@ func GenerateStatefulSet(solrCloud *solr.SolrCloud, solrCloudStatus *solr.SolrCl
 			Name:  "SOLR_HOST",
 			Value: solrHostName,
 		},
-		{
+	}
+
+	// Solr 10+ uses SOLR_HOST_ADVERTISE instead of the host setting in solr.xml
+	if isSolr10 {
+		envVars = append(envVars, corev1.EnvVar{
+			Name:  "SOLR_HOST_ADVERTISE",
+			Value: solrHostName,
+		})
+	}
+
+	// Solr 10+ loads modules via SOLR_MODULES env var instead of sharedLib contrib paths
+	if isSolr10 {
+		backupSection, solrModules, _ := GenerateBackupRepositoriesForSolrXml(solrCloud.Spec.BackupRepositories)
+		_ = backupSection
+		solrModules = append(solrModules, solrCloud.Spec.SolrModules...)
+		if len(solrModules) > 0 {
+			envVars = append(envVars, corev1.EnvVar{
+				Name:  "SOLR_MODULES",
+				Value: strings.Join(solrModules, ","),
+			})
+		}
+	}
+
+	envVars = append(envVars,
+		corev1.EnvVar{
 			Name:  "SOLR_LOG_LEVEL",
 			Value: solrCloud.Spec.SolrLogLevel,
 		},
-		{
+		corev1.EnvVar{
 			Name:  "GC_TUNE",
 			Value: solrCloud.Spec.SolrGCTune,
 		},
-		{
+		corev1.EnvVar{
 			Name:  "SOLR_STOP_WAIT",
 			Value: strconv.FormatInt(solrStopWait, 10),
 		},
-	}
+	)
 
 	// Add all necessary information for connection to Zookeeper
 	zkEnvVars, zkSolrOpt, _ := createZkConnectionEnvVars(solrCloud, solrCloudStatus)
@@ -832,6 +893,37 @@ const DefaultSolrXML = `<?xml version="1.0" encoding="UTF-8" ?>
 </solr>
 `
 
+// DefaultSolrXMLForSolr10 is the solr.xml template for Solr 10+.
+// Removed settings that no longer exist in Solr 10:
+//   - hostContext (always "solr", no longer configurable)
+//   - genericCoreNodeNames (always true, no longer configurable)
+//   - allowPaths (removed)
+//   - metrics enabled (removed, metrics always enabled)
+//
+// Note: "host" is still required in solr.xml. Solr 10 renamed the system property
+// from "host" to "solr.host.advertise" but the XML element is still needed.
+const DefaultSolrXMLForSolr10 = `<?xml version="1.0" encoding="UTF-8" ?>
+<solr>
+  %s
+  <solrcloud>
+    <str name="host">${solr.host.advertise:}</str>
+    <int name="hostPort">${solr.port.advertise:80}</int>
+    <int name="zkClientTimeout">${zkClientTimeout:30000}</int>
+    <int name="distribUpdateSoTimeout">${distribUpdateSoTimeout:600000}</int>
+    <int name="distribUpdateConnTimeout">${distribUpdateConnTimeout:60000}</int>
+    <str name="zkCredentialsProvider">${zkCredentialsProvider:org.apache.solr.common.cloud.DefaultZkCredentialsProvider}</str>
+    <str name="zkACLProvider">${zkACLProvider:org.apache.solr.common.cloud.DefaultZkACLProvider}</str>
+  </solrcloud>
+  <shardHandlerFactory name="shardHandlerFactory"
+    class="HttpShardHandlerFactory">
+    <int name="socketTimeout">${socketTimeout:600000}</int>
+    <int name="connTimeout">${connTimeout:60000}</int>
+  </shardHandlerFactory>
+  <int name="maxBooleanClauses">${solr.max.booleanClauses:1024}</int>
+  %s
+</solr>
+`
+
 // GenerateConfigMap returns a new corev1.ConfigMap pointer generated for the SolrCloud instance solr.xml
 // solrCloud: SolrCloud instance
 func GenerateConfigMap(solrCloud *solr.SolrCloud) *corev1.ConfigMap {
@@ -863,28 +955,41 @@ func GenerateSolrXMLStringForCloud(solrCloud *solr.SolrCloud) string {
 	backupSection, solrModules, additionalLibs := GenerateBackupRepositoriesForSolrXml(solrCloud.Spec.BackupRepositories)
 	solrModules = append(solrModules, solrCloud.Spec.SolrModules...)
 	additionalLibs = append(additionalLibs, solrCloud.Spec.AdditionalLibs...)
-	return GenerateSolrXMLString(backupSection, solrModules, additionalLibs)
+	imageTag := ""
+	if solrCloud.Spec.SolrImage != nil {
+		imageTag = solrCloud.Spec.SolrImage.Tag
+	}
+	isSolr10 := IsSolr10OrLater(imageTag)
+	return GenerateSolrXMLString(backupSection, solrModules, additionalLibs, isSolr10)
 }
 
-func GenerateSolrXMLString(backupSection string, solrModules []string, additionalLibs []string) string {
-	return fmt.Sprintf(DefaultSolrXML, GenerateAdditionalLibXMLPart(solrModules, additionalLibs), backupSection)
+func GenerateSolrXMLString(backupSection string, solrModules []string, additionalLibs []string, isSolr10 bool) string {
+	template := DefaultSolrXML
+	if isSolr10 {
+		template = DefaultSolrXMLForSolr10
+	}
+	return fmt.Sprintf(template, GenerateAdditionalLibXMLPart(solrModules, additionalLibs, isSolr10), backupSection)
 }
 
-func GenerateAdditionalLibXMLPart(solrModules []string, additionalLibs []string) string {
+func GenerateAdditionalLibXMLPart(solrModules []string, additionalLibs []string, isSolr10 bool) string {
 	libs := make(map[string]bool, 0)
 
 	// Placeholder for users to specify libs via sysprop
 	libs[SysPropLibPlaceholder] = true
 
-	// Add all module library locations
-	if len(solrModules) > 0 {
-		libs[DistLibs] = true
+	if !isSolr10 {
+		// Solr 9 and earlier: modules are loaded via sharedLib paths to contrib directories
+		if len(solrModules) > 0 {
+			libs[DistLibs] = true
+		}
+		for _, module := range solrModules {
+			libs[fmt.Sprintf(ContribLibs, module)] = true
+		}
 	}
-	for _, module := range solrModules {
-		libs[fmt.Sprintf(ContribLibs, module)] = true
-	}
+	// Solr 10+: modules are loaded via SOLR_MODULES env var, not sharedLib contrib paths.
+	// The contrib directory no longer exists in the Solr 10 Docker image.
 
-	// Add all custom library locations
+	// Add all custom library locations (these still work in Solr 10)
 	for _, libPath := range additionalLibs {
 		libs[libPath] = true
 	}
@@ -1250,7 +1355,7 @@ func generateZKInteractionInitContainer(solrCloud *solr.SolrCloud, solrCloudStat
 	}
 
 	if solrCloud.Spec.SolrTLS != nil {
-		cmd += setUrlSchemeClusterPropCmd()
+		cmd += setUrlSchemeClusterPropCmd(IsSolr10OrLater(solrCloud.Spec.SolrImage.Tag))
 	}
 
 	if security != nil && security.SecurityJson != "" {

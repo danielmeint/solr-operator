@@ -756,8 +756,23 @@ func mountedTLSPath(dir *solr.MountedTLSDirectory, fileName string, defaultName 
 	return fmt.Sprintf("%s/%s", dir.Path, fileName)
 }
 
-// Command to set the urlScheme cluster prop to "https"
-func setUrlSchemeClusterPropCmd() string {
+// Command to set the urlScheme cluster prop to "https".
+// Solr 10 removed zkcli.sh, so we use solr zk commands instead.
+func setUrlSchemeClusterPropCmd(isSolr10 bool) string {
+	if isSolr10 {
+		// Use solr zk to read the current clusterprops.json, merge urlScheme, and write it back.
+		// If /clusterprops.json doesn't exist yet, create it with just the urlScheme property.
+		return "solr zk cp zk:/clusterprops.json /tmp/clusterprops.json -z ${ZK_HOST} >/dev/null 2>&1 || echo '{}' > /tmp/clusterprops.json; " +
+			// Use a simple sed/awk to inject or update the urlScheme property
+			"if grep -q 'urlScheme' /tmp/clusterprops.json; then " +
+			"  sed -i 's/\"urlScheme\":\"[^\"]*\"/\"urlScheme\":\"https\"/' /tmp/clusterprops.json; " +
+			"else " +
+			"  sed -i 's/^{/{\"urlScheme\":\"https\",/' /tmp/clusterprops.json; " +
+			"  sed -i 's/,}/}/' /tmp/clusterprops.json; " +
+			"fi; " +
+			"solr zk cp /tmp/clusterprops.json zk:/clusterprops.json -z ${ZK_HOST}; " +
+			"solr zk cp zk:/clusterprops.json /dev/stdout -z ${ZK_HOST}; "
+	}
 	return "/opt/solr/server/scripts/cloud-scripts/zkcli.sh -zkhost ${ZK_HOST} -cmd clusterprop -name urlScheme -val https" +
 		"; /opt/solr/server/scripts/cloud-scripts/zkcli.sh -zkhost ${ZK_HOST} -cmd get /clusterprops.json;"
 }

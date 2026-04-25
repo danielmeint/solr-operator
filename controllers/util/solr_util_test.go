@@ -117,27 +117,27 @@ func TestGeneratedGcsRepositoryXmlSkipsCredentialIfUnset(t *testing.T) {
 
 func TestGenerateAdditionalLibXMLPart(t *testing.T) {
 	// No specified libs
-	xmlString := GenerateAdditionalLibXMLPart([]string{}, []string{})
+	xmlString := GenerateAdditionalLibXMLPart([]string{}, []string{}, false)
 	assert.EqualValuesf(t, xmlString, "<str name=\"sharedLib\">${solr.sharedLib:}</str>", "Wrong sharedLib xml for no specified libs")
 
 	// Just 1 repeated solr module
-	xmlString = GenerateAdditionalLibXMLPart([]string{"gcs-repository", "gcs-repository"}, []string{})
+	xmlString = GenerateAdditionalLibXMLPart([]string{"gcs-repository", "gcs-repository"}, []string{}, false)
 	assert.EqualValuesf(t, xmlString, "<str name=\"sharedLib\">${solr.sharedLib:},/opt/solr/contrib/gcs-repository/lib,/opt/solr/dist</str>", "Wrong sharedLib xml for just 1 repeated solr module")
 
 	// Just 2 different solr modules
-	xmlString = GenerateAdditionalLibXMLPart([]string{"gcs-repository", "analytics"}, []string{})
+	xmlString = GenerateAdditionalLibXMLPart([]string{"gcs-repository", "analytics"}, []string{}, false)
 	assert.EqualValuesf(t, xmlString, "<str name=\"sharedLib\">${solr.sharedLib:},/opt/solr/contrib/analytics/lib,/opt/solr/contrib/gcs-repository/lib,/opt/solr/dist</str>", "Wrong sharedLib xml for just 2 different solr modules")
 
 	// Just 2 repeated libs
-	xmlString = GenerateAdditionalLibXMLPart([]string{}, []string{"/ext/lib", "/ext/lib"})
+	xmlString = GenerateAdditionalLibXMLPart([]string{}, []string{"/ext/lib", "/ext/lib"}, false)
 	assert.EqualValuesf(t, xmlString, "<str name=\"sharedLib\">${solr.sharedLib:},/ext/lib</str>", "Wrong sharedLib xml for just 1 repeated additional lib")
 
 	// Just 2 different libs
-	xmlString = GenerateAdditionalLibXMLPart([]string{}, []string{"/ext/lib2", "/ext/lib1"})
+	xmlString = GenerateAdditionalLibXMLPart([]string{}, []string{"/ext/lib2", "/ext/lib1"}, false)
 	assert.EqualValuesf(t, xmlString, "<str name=\"sharedLib\">${solr.sharedLib:},/ext/lib1,/ext/lib2</str>", "Wrong sharedLib xml for just 2 different additional libs")
 
 	// Combination of everything
-	xmlString = GenerateAdditionalLibXMLPart([]string{"gcs-repository", "analytics", "analytics"}, []string{"/ext/lib2", "/ext/lib2", "/ext/lib1"})
+	xmlString = GenerateAdditionalLibXMLPart([]string{"gcs-repository", "analytics", "analytics"}, []string{"/ext/lib2", "/ext/lib2", "/ext/lib1"}, false)
 	assert.EqualValuesf(t, xmlString, "<str name=\"sharedLib\">${solr.sharedLib:},/ext/lib1,/ext/lib2,/opt/solr/contrib/analytics/lib,/opt/solr/contrib/gcs-repository/lib,/opt/solr/dist</str>", "Wrong sharedLib xml for mix of additional libs and solr modules")
 }
 
@@ -222,4 +222,95 @@ func TestGenerateSolrXMLStringForCloud(t *testing.T) {
 		},
 	}
 	assert.Containsf(t, GenerateSolrXMLStringForCloud(solrCloud), "<str name=\"sharedLib\">${solr.sharedLib:},/ext/lib1,/ext/lib2</str>", "Wrong sharedLib xml for a cloud with a just additionalLibs")
+}
+
+func TestSolrMajorVersion(t *testing.T) {
+	assert.Equal(t, 9, SolrMajorVersion("9.10.0"), "Standard 9.x version")
+	assert.Equal(t, 10, SolrMajorVersion("10.0.0"), "Standard 10.x version")
+	assert.Equal(t, 10, SolrMajorVersion("10.1.0"), "Solr 10.1")
+	assert.Equal(t, 11, SolrMajorVersion("11.0.0"), "Future major version")
+	assert.Equal(t, 10, SolrMajorVersion("10.0.0-SNAPSHOT"), "Snapshot version")
+	assert.Equal(t, 0, SolrMajorVersion("latest"), "Unparseable tag 'latest'")
+	assert.Equal(t, 0, SolrMajorVersion("nightly"), "Unparseable tag 'nightly'")
+	assert.Equal(t, 0, SolrMajorVersion(""), "Empty tag")
+}
+
+func TestIsSolr10OrLater(t *testing.T) {
+	assert.False(t, IsSolr10OrLater("9.10.0"), "9.10.0 is not Solr 10+")
+	assert.False(t, IsSolr10OrLater("9.0.0"), "9.0.0 is not Solr 10+")
+	assert.True(t, IsSolr10OrLater("10.0.0"), "10.0.0 is Solr 10+")
+	assert.True(t, IsSolr10OrLater("10.1.0"), "10.1.0 is Solr 10+")
+	assert.True(t, IsSolr10OrLater("11.0.0"), "11.0.0 is Solr 10+")
+	assert.True(t, IsSolr10OrLater("10.0.0-SNAPSHOT"), "10.0.0-SNAPSHOT is Solr 10+")
+	assert.False(t, IsSolr10OrLater("latest"), "Unparseable defaults to pre-10")
+	assert.False(t, IsSolr10OrLater(""), "Empty defaults to pre-10")
+}
+
+func TestGenerateAdditionalLibXMLPartSolr10(t *testing.T) {
+	// Solr 10: modules should NOT generate contrib paths (contrib dir doesn't exist)
+	xmlString := GenerateAdditionalLibXMLPart([]string{"gcs-repository", "analytics"}, []string{}, true)
+	assert.EqualValuesf(t, "<str name=\"sharedLib\">${solr.sharedLib:}</str>", xmlString, "Solr 10 should not include contrib paths for modules")
+	assert.NotContains(t, xmlString, "/opt/solr/contrib/", "Solr 10 should not reference contrib directory")
+	assert.NotContains(t, xmlString, "/opt/solr/dist", "Solr 10 should not reference dist directory for modules")
+
+	// Solr 10: custom additional libs should still be included
+	xmlString = GenerateAdditionalLibXMLPart([]string{}, []string{"/ext/lib1", "/ext/lib2"}, true)
+	assert.EqualValuesf(t, "<str name=\"sharedLib\">${solr.sharedLib:},/ext/lib1,/ext/lib2</str>", xmlString, "Solr 10 should still include custom additional libs")
+
+	// Solr 10: combination of modules (ignored in sharedLib) and custom libs
+	xmlString = GenerateAdditionalLibXMLPart([]string{"ltr"}, []string{"/ext/lib1"}, true)
+	assert.EqualValuesf(t, "<str name=\"sharedLib\">${solr.sharedLib:},/ext/lib1</str>", xmlString, "Solr 10 should include custom libs but not module contrib paths")
+}
+
+func TestGenerateSolrXMLStringForCloudSolr10(t *testing.T) {
+	solrCloud := &solr.SolrCloud{
+		Spec: solr.SolrCloudSpec{
+			SolrImage: &solr.ContainerImage{
+				Repository: "library/solr",
+				Tag:        "10.0.0",
+			},
+			SolrModules: []string{"ltr", "analytics"},
+		},
+	}
+	xmlString := GenerateSolrXMLStringForCloud(solrCloud)
+
+	// Should NOT contain Solr 9-specific settings
+	assert.NotContains(t, xmlString, "genericCoreNodeNames", "Solr 10 XML should not contain genericCoreNodeNames")
+	assert.NotContains(t, xmlString, "hostContext", "Solr 10 XML should not contain hostContext")
+	assert.NotContains(t, xmlString, "allowPaths", "Solr 10 XML should not contain allowPaths")
+	assert.NotContains(t, xmlString, "metricsEnabled", "Solr 10 XML should not contain metricsEnabled")
+
+	// Should use the new system property name for host
+	assert.Contains(t, xmlString, "${solr.host.advertise:}", "Solr 10 XML should use solr.host.advertise sysprop")
+	assert.NotContains(t, xmlString, "${host:}", "Solr 10 XML should not use deprecated host sysprop")
+
+	// Should still contain valid Solr 10 settings
+	assert.Contains(t, xmlString, "hostPort", "Solr 10 XML should still contain hostPort")
+	assert.Contains(t, xmlString, "zkClientTimeout", "Solr 10 XML should still contain zkClientTimeout")
+	assert.Contains(t, xmlString, "zkCredentialsProvider", "Solr 10 XML should still contain zkCredentialsProvider")
+
+	// Should NOT contain contrib paths (modules loaded via SOLR_MODULES env var)
+	assert.NotContains(t, xmlString, "/opt/solr/contrib/", "Solr 10 XML should not reference contrib directory")
+}
+
+func TestGenerateSolrXMLStringForCloudSolr9(t *testing.T) {
+	solrCloud := &solr.SolrCloud{
+		Spec: solr.SolrCloudSpec{
+			SolrImage: &solr.ContainerImage{
+				Repository: "library/solr",
+				Tag:        "9.10.0",
+			},
+			SolrModules: []string{"ltr"},
+		},
+	}
+	xmlString := GenerateSolrXMLStringForCloud(solrCloud)
+
+	// Should contain Solr 9-specific settings
+	assert.Contains(t, xmlString, "genericCoreNodeNames", "Solr 9 XML should contain genericCoreNodeNames")
+	assert.Contains(t, xmlString, "hostContext", "Solr 9 XML should contain hostContext")
+	assert.Contains(t, xmlString, "<str name=\"host\">", "Solr 9 XML should contain host setting")
+	assert.Contains(t, xmlString, "allowPaths", "Solr 9 XML should contain allowPaths")
+
+	// Should contain contrib paths for modules
+	assert.Contains(t, xmlString, "/opt/solr/contrib/ltr/lib", "Solr 9 XML should reference contrib directory for modules")
 }

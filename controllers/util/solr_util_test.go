@@ -21,6 +21,7 @@ import (
 	solr "github.com/apache/solr-operator/api/v1beta1"
 	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"testing"
 )
 
@@ -313,4 +314,48 @@ func TestGenerateSolrXMLStringForCloudSolr9(t *testing.T) {
 
 	// Should contain contrib paths for modules
 	assert.Contains(t, xmlString, "/opt/solr/contrib/ltr/lib", "Solr 9 XML should reference contrib directory for modules")
+}
+
+func newProbeForTest() *corev1.Probe {
+	return &corev1.Probe{
+		ProbeHandler: corev1.ProbeHandler{
+			HTTPGet: &corev1.HTTPGetAction{
+				Path: "/solr/admin/info/system",
+				Port: intstr.FromInt32(8983),
+			},
+		},
+	}
+}
+
+func TestUseSecureProbeForSolr9(t *testing.T) {
+	solrCloud := &solr.SolrCloud{
+		Spec: solr.SolrCloudSpec{
+			SolrImage: &solr.ContainerImage{Repository: "library/solr", Tag: "9.10.0"},
+		},
+	}
+	probe := newProbeForTest()
+	useSecureProbe(solrCloud, probe, "/etc/secrets/foo")
+
+	assert.Nil(t, probe.HTTPGet, "HTTPGet should be replaced by Exec")
+	assert.NotNil(t, probe.Exec, "Exec command should be set")
+	cmd := probe.Exec.Command[2]
+	assert.Contains(t, cmd, "solr api -get", "Solr 9 should use 'solr api -get' syntax")
+	assert.Contains(t, cmd, "${SOLR_HOST}", "Solr 9 probe should reference SOLR_HOST env var")
+	assert.NotContains(t, cmd, "--solr-url", "Solr 9 should not use Solr 10 --solr-url flag")
+}
+
+func TestUseSecureProbeForSolr10(t *testing.T) {
+	solrCloud := &solr.SolrCloud{
+		Spec: solr.SolrCloudSpec{
+			SolrImage: &solr.ContainerImage{Repository: "library/solr", Tag: "10.0.0"},
+		},
+	}
+	probe := newProbeForTest()
+	useSecureProbe(solrCloud, probe, "/etc/secrets/foo")
+
+	assert.Nil(t, probe.HTTPGet, "HTTPGet should be replaced by Exec")
+	assert.NotNil(t, probe.Exec, "Exec command should be set")
+	cmd := probe.Exec.Command[2]
+	assert.Contains(t, cmd, "solr api --solr-url", "Solr 10 should use 'solr api --solr-url' syntax")
+	assert.NotContains(t, cmd, "-get ", "Solr 10 should not use Solr 9 -get flag")
 }

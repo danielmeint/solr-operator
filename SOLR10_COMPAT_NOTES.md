@@ -43,7 +43,7 @@ Still required but renamed sysprop:
 ## Known remaining work
 
 - **Prometheus Exporter**: `DefaultPrometheusExporterEntrypoint` references `/opt/solr/contrib/prometheus-exporter/bin/solr-exporter` which doesn't exist in Solr 10. The exporter was removed; metrics should be scraped directly from Solr's built-in metrics endpoint. See issue #820.
-- **Deprecation warning**: `SOLR_HOST` env var triggers `"You are passing in deprecated system property host"` in Solr 10 logs. Harmless but noisy. Could be resolved by only setting `SOLR_HOST_ADVERTISE` for Solr 10.
+- **Deprecation warning**: Solr 10 logs `"You are passing in deprecated system property host"` on startup. Investigated: this is **not** caused by the operator's `SOLR_HOST` env var — Solr 10's `bin/solr` doesn't translate `SOLR_HOST` to `-Dhost`. Removing `SOLR_HOST` from the pod spec doesn't silence the warning, and Solr 10's own default `solr.xml` ships with `<str name="host">${solr.host.advertise:}</str>` (same as ours). The warning is emitted by Solr internals (`o.a.s.c.u.EnvUtils`) and appears to be a Solr 10 false positive. Harmless — leaving as-is.
 - **Solr 10.1.0 targeting**: HoustonPutman suggested targeting 10.1.0 due to `-c` flag removal in `solr create`. This mainly affects the CLI, not the operator's API-based approach.
 
 ## E2E test results (Solr 10.0.0)

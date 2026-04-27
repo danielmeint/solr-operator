@@ -1327,6 +1327,42 @@ func (zkInfo ZookeeperConnectionInfo) ZkConnectionString() string {
 	return zkInfo.InternalConnectionString + zkInfo.ChRoot
 }
 
+// Solr10MajorVersion is the version threshold for Solr 10+ incompatible changes.
+const Solr10MajorVersion = 10
+
+// SolrMajorVersion extracts the major version number from a Solr image tag.
+// Returns 0 if the tag cannot be parsed (e.g. "latest", "nightly", custom tags).
+func SolrMajorVersion(imageTag string) int {
+	tag := strings.TrimPrefix(imageTag, "v")
+	if idx := strings.Index(tag, "-"); idx >= 0 {
+		tag = tag[:idx]
+	}
+	major := tag
+	if idx := strings.Index(tag, "."); idx >= 0 {
+		major = tag[:idx]
+	}
+	v, err := strconv.Atoi(major)
+	if err != nil {
+		return 0
+	}
+	return v
+}
+
+// IsSolr10OrLater returns true if the given image tag represents Solr 10.0 or later.
+// Unparseable tags (e.g. "latest") are treated as pre-10 for backwards compatibility.
+func IsSolr10OrLater(imageTag string) bool {
+	return SolrMajorVersion(imageTag) >= Solr10MajorVersion
+}
+
+// IsSolr10OrLater returns true if this SolrCloud's image tag represents Solr 10.0 or later.
+// A nil SolrImage is treated as pre-10.
+func (sc *SolrCloud) IsSolr10OrLater() bool {
+	if sc.Spec.SolrImage == nil {
+		return false
+	}
+	return IsSolr10OrLater(sc.Spec.SolrImage.Tag)
+}
+
 // UsesHeadlessService returns whether the given solrCloud requires a headless service to be created for it.
 // solrCloud: SolrCloud instance
 func (sc *SolrCloud) UsesHeadlessService() bool {

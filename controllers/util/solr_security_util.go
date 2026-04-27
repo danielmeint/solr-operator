@@ -521,7 +521,7 @@ func useSecureProbe(solrCloud *solr.SolrCloud, probe *corev1.Probe, mountPath st
 	}
 
 	apiUrlFlag := "-get"
-	if IsSolr10OrLater(solrCloud.Spec.SolrImage.Tag) {
+	if solrCloud.IsSolr10OrLater() {
 		apiUrlFlag = "--solr-url"
 	}
 	probeCommand := fmt.Sprintf("%ssolr api %s \"%s://${SOLR_HOST}:%d%s\"%s", javaToolOptionsStr, apiUrlFlag, solrCloud.UrlScheme(false), probe.HTTPGet.Port.IntVal, probe.HTTPGet.Path, javaToolOptionsOutputFilter)

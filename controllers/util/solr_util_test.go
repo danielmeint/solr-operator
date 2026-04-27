@@ -226,25 +226,30 @@ func TestGenerateSolrXMLStringForCloud(t *testing.T) {
 }
 
 func TestSolrMajorVersion(t *testing.T) {
-	assert.Equal(t, 9, SolrMajorVersion("9.10.0"), "Standard 9.x version")
-	assert.Equal(t, 10, SolrMajorVersion("10.0.0"), "Standard 10.x version")
-	assert.Equal(t, 10, SolrMajorVersion("10.1.0"), "Solr 10.1")
-	assert.Equal(t, 11, SolrMajorVersion("11.0.0"), "Future major version")
-	assert.Equal(t, 10, SolrMajorVersion("10.0.0-SNAPSHOT"), "Snapshot version")
-	assert.Equal(t, 0, SolrMajorVersion("latest"), "Unparseable tag 'latest'")
-	assert.Equal(t, 0, SolrMajorVersion("nightly"), "Unparseable tag 'nightly'")
-	assert.Equal(t, 0, SolrMajorVersion(""), "Empty tag")
+	assert.Equal(t, 9, solr.SolrMajorVersion("9.10.0"), "Standard 9.x version")
+	assert.Equal(t, 10, solr.SolrMajorVersion("10.0.0"), "Standard 10.x version")
+	assert.Equal(t, 10, solr.SolrMajorVersion("10.1.0"), "Solr 10.1")
+	assert.Equal(t, 11, solr.SolrMajorVersion("11.0.0"), "Future major version")
+	assert.Equal(t, 10, solr.SolrMajorVersion("10.0.0-SNAPSHOT"), "Snapshot version")
+	assert.Equal(t, 0, solr.SolrMajorVersion("latest"), "Unparseable tag 'latest'")
+	assert.Equal(t, 0, solr.SolrMajorVersion("nightly"), "Unparseable tag 'nightly'")
+	assert.Equal(t, 0, solr.SolrMajorVersion(""), "Empty tag")
 }
 
 func TestIsSolr10OrLater(t *testing.T) {
-	assert.False(t, IsSolr10OrLater("9.10.0"), "9.10.0 is not Solr 10+")
-	assert.False(t, IsSolr10OrLater("9.0.0"), "9.0.0 is not Solr 10+")
-	assert.True(t, IsSolr10OrLater("10.0.0"), "10.0.0 is Solr 10+")
-	assert.True(t, IsSolr10OrLater("10.1.0"), "10.1.0 is Solr 10+")
-	assert.True(t, IsSolr10OrLater("11.0.0"), "11.0.0 is Solr 10+")
-	assert.True(t, IsSolr10OrLater("10.0.0-SNAPSHOT"), "10.0.0-SNAPSHOT is Solr 10+")
-	assert.False(t, IsSolr10OrLater("latest"), "Unparseable defaults to pre-10")
-	assert.False(t, IsSolr10OrLater(""), "Empty defaults to pre-10")
+	assert.False(t, solr.IsSolr10OrLater("9.10.0"), "9.10.0 is not Solr 10+")
+	assert.False(t, solr.IsSolr10OrLater("9.0.0"), "9.0.0 is not Solr 10+")
+	assert.True(t, solr.IsSolr10OrLater("10.0.0"), "10.0.0 is Solr 10+")
+	assert.True(t, solr.IsSolr10OrLater("10.1.0"), "10.1.0 is Solr 10+")
+	assert.True(t, solr.IsSolr10OrLater("11.0.0"), "11.0.0 is Solr 10+")
+	assert.True(t, solr.IsSolr10OrLater("10.0.0-SNAPSHOT"), "10.0.0-SNAPSHOT is Solr 10+")
+	assert.False(t, solr.IsSolr10OrLater("latest"), "Unparseable defaults to pre-10")
+	assert.False(t, solr.IsSolr10OrLater(""), "Empty defaults to pre-10")
+
+	// Method form on SolrCloud handles nil-image edge case
+	assert.False(t, (&solr.SolrCloud{}).IsSolr10OrLater(), "nil SolrImage defaults to pre-10")
+	cloud := &solr.SolrCloud{Spec: solr.SolrCloudSpec{SolrImage: &solr.ContainerImage{Tag: "10.0.0"}}}
+	assert.True(t, cloud.IsSolr10OrLater(), "SolrCloud with 10.0.0 tag is Solr 10+")
 }
 
 func TestGenerateAdditionalLibXMLPartSolr10(t *testing.T) {

@@ -71,9 +71,6 @@ const (
 	DistLibs              = "/opt/solr/dist"
 	ContribLibs           = "/opt/solr/contrib/%s/lib"
 	SysPropLibPlaceholder = "${solr.sharedLib:}"
-
-	// Solr version threshold for Solr 10+ incompatible changes
-	Solr10MajorVersion = 10
 )
 
 var (
@@ -82,34 +79,6 @@ var (
 	DefaultSolrZKPrepInitContainerMemory     = resource.NewScaledQuantity(200, 6)
 	DefaultSolrZKPrepInitContainerCPU        = resource.NewMilliQuantity(400, resource.DecimalExponent)
 )
-
-// SolrMajorVersion extracts the major version number from a Solr image tag.
-// Returns 0 if the tag cannot be parsed (e.g. "latest", "nightly", custom tags).
-func SolrMajorVersion(imageTag string) int {
-	// Strip common prefixes like "v" if present
-	tag := strings.TrimPrefix(imageTag, "v")
-	// Take the first segment before any "-" (e.g. "10.0.0-SNAPSHOT" -> "10.0.0")
-	if idx := strings.Index(tag, "-"); idx >= 0 {
-		tag = tag[:idx]
-	}
-	// Take the major version (first segment before ".")
-	major := tag
-	if idx := strings.Index(tag, "."); idx >= 0 {
-		major = tag[:idx]
-	}
-	v, err := strconv.Atoi(major)
-	if err != nil {
-		return 0
-	}
-	return v
-}
-
-// IsSolr10OrLater returns true if the given image tag represents Solr 10.0 or later.
-// Returns false for unparseable tags (e.g. "latest") — callers should treat unknown versions
-// as pre-10 for backwards compatibility.
-func IsSolr10OrLater(imageTag string) bool {
-	return SolrMajorVersion(imageTag) >= Solr10MajorVersion
-}
 
 // GenerateStatefulSet returns a new appsv1.StatefulSet pointer generated for the SolrCloud instance
 // object: SolrCloud instance
@@ -179,7 +148,7 @@ func GenerateStatefulSet(solrCloud *solr.SolrCloud, solrCloudStatus *solr.SolrCl
 		},
 	}
 
-	isSolr10 := IsSolr10OrLater(solrCloud.Spec.SolrImage.Tag)
+	isSolr10 := solrCloud.IsSolr10OrLater()
 
 	// Keep track of the SolrOpts that the Solr Operator needs to set
 	// These will be added to the SolrOpts given by the user.
@@ -955,12 +924,7 @@ func GenerateSolrXMLStringForCloud(solrCloud *solr.SolrCloud) string {
 	backupSection, solrModules, additionalLibs := GenerateBackupRepositoriesForSolrXml(solrCloud.Spec.BackupRepositories)
 	solrModules = append(solrModules, solrCloud.Spec.SolrModules...)
 	additionalLibs = append(additionalLibs, solrCloud.Spec.AdditionalLibs...)
-	imageTag := ""
-	if solrCloud.Spec.SolrImage != nil {
-		imageTag = solrCloud.Spec.SolrImage.Tag
-	}
-	isSolr10 := IsSolr10OrLater(imageTag)
-	return GenerateSolrXMLString(backupSection, solrModules, additionalLibs, isSolr10)
+	return GenerateSolrXMLString(backupSection, solrModules, additionalLibs, solrCloud.IsSolr10OrLater())
 }
 
 func GenerateSolrXMLString(backupSection string, solrModules []string, additionalLibs []string, isSolr10 bool) string {
@@ -1355,7 +1319,7 @@ func generateZKInteractionInitContainer(solrCloud *solr.SolrCloud, solrCloudStat
 	}
 
 	if solrCloud.Spec.SolrTLS != nil {
-		cmd += setUrlSchemeClusterPropCmd(IsSolr10OrLater(solrCloud.Spec.SolrImage.Tag))
+		cmd += setUrlSchemeClusterPropCmd(solrCloud.IsSolr10OrLater())
 	}
 
 	if security != nil && security.SecurityJson != "" {

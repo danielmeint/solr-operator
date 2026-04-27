@@ -477,7 +477,7 @@ func callSolrApiInPod(ctx context.Context, solrCloud *solrv1beta1.SolrCloud, htt
 		queryParamsString = "?" + queryParamsString
 	}
 
-	isSolr10 := util.IsSolr10OrLater(strings.Split(solrImage+":", ":")[1])
+	isSolr10 := solrv1beta1.IsSolr10OrLater(strings.Split(solrImage+":", ":")[1])
 
 	credentials := ""
 	toolOpts := ""

@@ -38,7 +38,7 @@ Still required but renamed sysprop:
 
 ## Version detection
 
-`IsSolr10OrLater(imageTag string) bool` parses the major version from the Solr image tag. Returns false for unparseable tags (e.g. "latest", "nightly") — unknown versions are treated as pre-10 for backwards compatibility.
+`(*SolrCloud).IsSolr10OrLater() bool` (in `api/v1beta1/solrcloud_types.go`) parses the major version from `Spec.SolrImage.Tag` and handles the nil-image edge case. Returns false for unparseable tags (e.g. "latest", "nightly") — unknown versions are treated as pre-10 for backwards compatibility. A package-level `IsSolr10OrLater(imageTag string)` is also exported for callers that only have a raw image string (e.g. e2e helpers).
 
 ## Known remaining work
 

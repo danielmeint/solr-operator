@@ -19,9 +19,11 @@ package util
 
 import (
 	solr "github.com/apache/solr-operator/api/v1beta1"
+	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"strings"
 	"testing"
 )
 
@@ -231,6 +233,7 @@ func TestSolrMajorVersion(t *testing.T) {
 	assert.Equal(t, 10, solr.SolrMajorVersion("10.1.0"), "Solr 10.1")
 	assert.Equal(t, 11, solr.SolrMajorVersion("11.0.0"), "Future major version")
 	assert.Equal(t, 10, solr.SolrMajorVersion("10.0.0-SNAPSHOT"), "Snapshot version")
+	assert.Equal(t, 10, solr.SolrMajorVersion("v10.0.0"), "Tag with 'v' prefix")
 	assert.Equal(t, 0, solr.SolrMajorVersion("latest"), "Unparseable tag 'latest'")
 	assert.Equal(t, 0, solr.SolrMajorVersion("nightly"), "Unparseable tag 'nightly'")
 	assert.Equal(t, 0, solr.SolrMajorVersion(""), "Empty tag")
@@ -245,11 +248,16 @@ func TestIsSolr10OrLater(t *testing.T) {
 	assert.True(t, solr.IsSolr10OrLater("10.0.0-SNAPSHOT"), "10.0.0-SNAPSHOT is Solr 10+")
 	assert.False(t, solr.IsSolr10OrLater("latest"), "Unparseable defaults to pre-10")
 	assert.False(t, solr.IsSolr10OrLater(""), "Empty defaults to pre-10")
+}
 
-	// Method form on SolrCloud handles nil-image edge case
+func TestSolrCloud_IsSolr10OrLater(t *testing.T) {
 	assert.False(t, (&solr.SolrCloud{}).IsSolr10OrLater(), "nil SolrImage defaults to pre-10")
-	cloud := &solr.SolrCloud{Spec: solr.SolrCloudSpec{SolrImage: &solr.ContainerImage{Tag: "10.0.0"}}}
-	assert.True(t, cloud.IsSolr10OrLater(), "SolrCloud with 10.0.0 tag is Solr 10+")
+
+	cloud9 := &solr.SolrCloud{Spec: solr.SolrCloudSpec{SolrImage: &solr.ContainerImage{Tag: "9.10.0"}}}
+	assert.False(t, cloud9.IsSolr10OrLater(), "SolrCloud with 9.10.0 tag is pre-10")
+
+	cloud10 := &solr.SolrCloud{Spec: solr.SolrCloudSpec{SolrImage: &solr.ContainerImage{Tag: "10.0.0"}}}
+	assert.True(t, cloud10.IsSolr10OrLater(), "SolrCloud with 10.0.0 tag is Solr 10+")
 }
 
 func TestGenerateAdditionalLibXMLPartSolr10(t *testing.T) {
@@ -363,4 +371,94 @@ func TestUseSecureProbeForSolr10(t *testing.T) {
 	cmd := probe.Exec.Command[2]
 	assert.Contains(t, cmd, "solr api --solr-url", "Solr 10 should use 'solr api --solr-url' syntax")
 	assert.NotContains(t, cmd, "-get ", "Solr 10 should not use Solr 9 -get flag")
+}
+
+func TestSetUrlSchemeClusterPropCmd(t *testing.T) {
+	// Solr 9 uses zkcli.sh
+	solr9Cmd := setUrlSchemeClusterPropCmd(false)
+	assert.Contains(t, solr9Cmd, "zkcli.sh", "Solr 9 should call zkcli.sh")
+	assert.Contains(t, solr9Cmd, "clusterprop", "Solr 9 should use the clusterprop subcommand")
+
+	// Solr 10 uses `solr cluster --property`
+	solr10Cmd := setUrlSchemeClusterPropCmd(true)
+	assert.NotContains(t, solr10Cmd, "zkcli.sh", "Solr 10 must not call removed zkcli.sh")
+	assert.Contains(t, solr10Cmd, "solr cluster --property urlScheme --value https", "Solr 10 should set the cluster property via the `solr cluster` CLI")
+}
+
+func newSolrCloudForTest(tag string, modules []string) *solr.SolrCloud {
+	cloud := &solr.SolrCloud{
+		Spec: solr.SolrCloudSpec{
+			SolrImage:   &solr.ContainerImage{Repository: "library/solr", Tag: tag},
+			SolrModules: modules,
+		},
+	}
+	cloud.WithDefaults(logr.Discard())
+	return cloud
+}
+
+func solrNodeContainerEnv(t *testing.T, cloud *solr.SolrCloud) []corev1.EnvVar {
+	t.Helper()
+	status := &solr.SolrCloudStatus{
+		ZookeeperConnectionInfo: solr.ZookeeperConnectionInfo{
+			InternalConnectionString: "zk:2181",
+			ChRoot:                   "/solr",
+		},
+	}
+	ss := GenerateStatefulSet(cloud, status, map[string]string{}, map[string]string{}, nil, nil)
+	for _, c := range ss.Spec.Template.Spec.Containers {
+		if c.Name == SolrNodeContainer {
+			return c.Env
+		}
+	}
+	t.Fatalf("solr node container not found in generated StatefulSet")
+	return nil
+}
+
+func envValue(env []corev1.EnvVar, name string) (string, bool) {
+	for _, e := range env {
+		if e.Name == name {
+			return e.Value, true
+		}
+	}
+	return "", false
+}
+
+func TestGenerateStatefulSetSolr10EnvVars(t *testing.T) {
+	cloud := newSolrCloudForTest("10.0.0", []string{"ltr", "analytics"})
+	env := solrNodeContainerEnv(t, cloud)
+
+	advertise, ok := envValue(env, "SOLR_HOST_ADVERTISE")
+	assert.True(t, ok, "Solr 10 pod should have SOLR_HOST_ADVERTISE set")
+	assert.NotEmpty(t, advertise, "SOLR_HOST_ADVERTISE should not be empty")
+
+	modules, ok := envValue(env, "SOLR_MODULES")
+	assert.True(t, ok, "Solr 10 pod should have SOLR_MODULES set when modules are configured")
+	assert.Contains(t, modules, "ltr")
+	assert.Contains(t, modules, "analytics")
+
+	solrOpts, _ := envValue(env, "SOLR_OPTS")
+	assert.NotContains(t, solrOpts, "-DhostPort=", "Solr 10 should not set the hostPort sysprop")
+}
+
+func TestGenerateStatefulSetSolr10NoModules(t *testing.T) {
+	cloud := newSolrCloudForTest("10.0.0", nil)
+	env := solrNodeContainerEnv(t, cloud)
+
+	_, ok := envValue(env, "SOLR_MODULES")
+	assert.False(t, ok, "SOLR_MODULES should not be set when no modules are configured")
+}
+
+func TestGenerateStatefulSetSolr9EnvVars(t *testing.T) {
+	cloud := newSolrCloudForTest("9.10.0", []string{"ltr"})
+	env := solrNodeContainerEnv(t, cloud)
+
+	_, ok := envValue(env, "SOLR_HOST_ADVERTISE")
+	assert.False(t, ok, "Solr 9 pod should not have SOLR_HOST_ADVERTISE set")
+
+	_, ok = envValue(env, "SOLR_MODULES")
+	assert.False(t, ok, "Solr 9 pod should not have SOLR_MODULES set; modules are loaded via sharedLib")
+
+	solrOpts, ok := envValue(env, "SOLR_OPTS")
+	assert.True(t, ok, "Solr 9 pod should have SOLR_OPTS set")
+	assert.True(t, strings.Contains(solrOpts, "-DhostPort="), "Solr 9 should set the hostPort sysprop")
 }

@@ -8,7 +8,7 @@ Solr 10 removed several `<solrcloud>` configuration parameters. If present, Solr
 Removed:
 - `genericCoreNodeNames` — always true now
 - `hostContext` — always "solr"
-- `allowPaths` — removed entirely
+- `allowPaths` — moved out of `<solrcloud>` to top-level (`<str name="allowPaths">…</str>`); we omit it and rely on Solr's empty default
 - `metricsEnabled` — metrics always enabled
 
 Still required but renamed sysprop:

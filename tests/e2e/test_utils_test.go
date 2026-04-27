@@ -478,6 +478,12 @@ func callSolrApiInPod(ctx context.Context, solrCloud *solrv1beta1.SolrCloud, htt
 	}
 
 	isSolr10 := solrv1beta1.IsSolr10OrLater(strings.Split(solrImage+":", ":")[1])
+	if isSolr10 {
+		// Solr 10's `solr api` only supports GET (--solr-url URL). The legacy
+		// `-get/-post URL` flags were removed. Fail loudly if a non-GET caller
+		// is added, instead of silently turning the request into a GET.
+		Expect(strings.ToLower(httpMethod)).To(Equal("get"), "callSolrApiInPod against Solr 10 only supports GET")
+	}
 
 	credentials := ""
 	toolOpts := ""

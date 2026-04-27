@@ -1327,9 +1327,6 @@ func (zkInfo ZookeeperConnectionInfo) ZkConnectionString() string {
 	return zkInfo.InternalConnectionString + zkInfo.ChRoot
 }
 
-// Solr10MajorVersion is the version threshold for Solr 10+ incompatible changes.
-const Solr10MajorVersion = 10
-
 // SolrMajorVersion extracts the major version number from a Solr image tag.
 // Returns 0 if the tag cannot be parsed (e.g. "latest", "nightly", custom tags).
 func SolrMajorVersion(imageTag string) int {
@@ -1351,7 +1348,7 @@ func SolrMajorVersion(imageTag string) int {
 // IsSolr10OrLater returns true if the given image tag represents Solr 10.0 or later.
 // Unparseable tags (e.g. "latest") are treated as pre-10 for backwards compatibility.
 func IsSolr10OrLater(imageTag string) bool {
-	return SolrMajorVersion(imageTag) >= Solr10MajorVersion
+	return SolrMajorVersion(imageTag) >= 10
 }
 
 // IsSolr10OrLater returns true if this SolrCloud's image tag represents Solr 10.0 or later.

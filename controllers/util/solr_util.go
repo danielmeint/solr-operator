@@ -383,43 +383,34 @@ func GenerateStatefulSet(solrCloud *solr.SolrCloud, solrCloudStatus *solr.SolrCl
 			Name:  "SOLR_HOST",
 			Value: solrHostName,
 		},
+		{
+			Name:  "SOLR_LOG_LEVEL",
+			Value: solrCloud.Spec.SolrLogLevel,
+		},
+		{
+			Name:  "GC_TUNE",
+			Value: solrCloud.Spec.SolrGCTune,
+		},
+		{
+			Name:  "SOLR_STOP_WAIT",
+			Value: strconv.FormatInt(solrStopWait, 10),
+		},
 	}
 
-	// Solr 10+ uses SOLR_HOST_ADVERTISE instead of the host setting in solr.xml
+	// Solr 10+ uses SOLR_HOST_ADVERTISE in place of the deprecated 'host' sysprop,
+	// and loads modules via SOLR_MODULES instead of sharedLib contrib paths.
 	if isSolr10 {
 		envVars = append(envVars, corev1.EnvVar{
 			Name:  "SOLR_HOST_ADVERTISE",
 			Value: solrHostName,
 		})
-	}
-
-	// Solr 10+ loads modules via SOLR_MODULES env var instead of sharedLib contrib paths
-	if isSolr10 {
-		backupSection, solrModules, _ := GenerateBackupRepositoriesForSolrXml(solrCloud.Spec.BackupRepositories)
-		_ = backupSection
-		solrModules = append(solrModules, solrCloud.Spec.SolrModules...)
-		if len(solrModules) > 0 {
+		if modules := cloudSolrModules(solrCloud); len(modules) > 0 {
 			envVars = append(envVars, corev1.EnvVar{
 				Name:  "SOLR_MODULES",
-				Value: strings.Join(solrModules, ","),
+				Value: strings.Join(modules, ","),
 			})
 		}
 	}
-
-	envVars = append(envVars,
-		corev1.EnvVar{
-			Name:  "SOLR_LOG_LEVEL",
-			Value: solrCloud.Spec.SolrLogLevel,
-		},
-		corev1.EnvVar{
-			Name:  "GC_TUNE",
-			Value: solrCloud.Spec.SolrGCTune,
-		},
-		corev1.EnvVar{
-			Name:  "SOLR_STOP_WAIT",
-			Value: strconv.FormatInt(solrStopWait, 10),
-		},
-	)
 
 	// Add all necessary information for connection to Zookeeper
 	zkEnvVars, zkSolrOpt, _ := createZkConnectionEnvVars(solrCloud, solrCloudStatus)
@@ -863,25 +854,29 @@ const DefaultSolrXML = `<?xml version="1.0" encoding="UTF-8" ?>
 `
 
 // DefaultSolrXMLForSolr10 is the solr.xml template for Solr 10+.
-// Removed settings that no longer exist in Solr 10:
-//   - hostContext (always "solr", no longer configurable)
-//   - genericCoreNodeNames (always true, no longer configurable)
-//   - allowPaths (removed)
-//   - metrics enabled (removed, metrics always enabled)
+// Settings dropped relative to Solr 9 are no longer supported by Solr 10:
+//   - hostContext (always "solr")
+//   - genericCoreNodeNames (always true)
+//   - allowPaths (moved out of <solrcloud>; we omit it and rely on the empty default)
+//   - metrics enabled (metrics are always on)
 //
-// Note: "host" is still required in solr.xml. Solr 10 renamed the system property
-// from "host" to "solr.host.advertise" but the XML element is still needed.
+// The "host" element is still required, but its system property was renamed
+// from "host" to "solr.host.advertise". The remaining elements mirror Solr 10's
+// stock server/solr/solr.xml so reviewers can diff against upstream.
 const DefaultSolrXMLForSolr10 = `<?xml version="1.0" encoding="UTF-8" ?>
 <solr>
   %s
   <solrcloud>
     <str name="host">${solr.host.advertise:}</str>
-    <int name="hostPort">${solr.port.advertise:80}</int>
+    <int name="hostPort">${solr.port.advertise:0}</int>
     <int name="zkClientTimeout">${zkClientTimeout:30000}</int>
     <int name="distribUpdateSoTimeout">${distribUpdateSoTimeout:600000}</int>
     <int name="distribUpdateConnTimeout">${distribUpdateConnTimeout:60000}</int>
     <str name="zkCredentialsProvider">${zkCredentialsProvider:org.apache.solr.common.cloud.DefaultZkCredentialsProvider}</str>
     <str name="zkACLProvider">${zkACLProvider:org.apache.solr.common.cloud.DefaultZkACLProvider}</str>
+    <str name="zkCredentialsInjector">${zkCredentialsInjector:org.apache.solr.common.cloud.DefaultZkCredentialsInjector}</str>
+    <int name="minStateByteLenForCompression">${minStateByteLenForCompression:-1}</int>
+    <str name="stateCompressor">${stateCompressor:org.apache.solr.common.util.ZLibCompressor}</str>
   </solrcloud>
   <shardHandlerFactory name="shardHandlerFactory"
     class="HttpShardHandlerFactory">
@@ -918,6 +913,13 @@ func GenerateConfigMap(solrCloud *solr.SolrCloud) *corev1.ConfigMap {
 	}
 
 	return configMap
+}
+
+// cloudSolrModules returns the union of modules implied by configured backup repositories
+// and explicit Spec.SolrModules entries.
+func cloudSolrModules(solrCloud *solr.SolrCloud) []string {
+	_, modules, _ := GenerateBackupRepositoriesForSolrXml(solrCloud.Spec.BackupRepositories)
+	return append(modules, solrCloud.Spec.SolrModules...)
 }
 
 func GenerateSolrXMLStringForCloud(solrCloud *solr.SolrCloud) string {

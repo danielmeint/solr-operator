@@ -477,6 +477,15 @@ func callSolrApiInPod(ctx context.Context, solrCloud *solrv1beta1.SolrCloud, htt
 		queryParamsString = "?" + queryParamsString
 	}
 
+	isSolr10 := solrv1beta1.IsSolr10OrLater(strings.Split(solrImage+":", ":")[1])
+	if isSolr10 {
+		// Solr 10's `solr api` only supports GET (--solr-url URL). The legacy
+		// `-get/-post URL` flags were removed. Fail loudly if a non-GET caller
+		// is added, instead of silently turning the request into a GET.
+		Expect(strings.ToLower(httpMethod)).To(Equal("get"), "callSolrApiInPod against Solr 10 only supports GET")
+	}
+
+	credentials := ""
 	toolOpts := ""
 	if solrCloud.Spec.SolrSecurity != nil && solrCloud.Spec.SolrSecurity.AuthenticationType == solrv1beta1.Basic {
 		basicAuthSecretName := solrCloud.BasicAuthSecretName()
@@ -484,25 +493,31 @@ func callSolrApiInPod(ctx context.Context, solrCloud *solrv1beta1.SolrCloud, htt
 		if err = k8sClient.Get(ctx, resourceKey(solrCloud, basicAuthSecretName), basicAuthSecret); err != nil {
 			return "", err
 		}
-		toolOpts =
-			"JAVA_TOOL_OPTIONS=\"-Dbasicauth=" +
-				string(basicAuthSecret.Data[corev1.BasicAuthUsernameKey]) + ":" + string(basicAuthSecret.Data[corev1.BasicAuthPasswordKey]) +
-				" -Dsolr.httpclient.builder.factory=org.apache.solr.client.solrj.impl.PreemptiveBasicAuthClientBuilderFactory\""
+		credentials = string(basicAuthSecret.Data[corev1.BasicAuthUsernameKey]) + ":" + string(basicAuthSecret.Data[corev1.BasicAuthPasswordKey])
+		if !isSolr10 {
+			toolOpts =
+				"JAVA_TOOL_OPTIONS=\"-Dbasicauth=" + credentials +
+					" -Dsolr.httpclient.builder.factory=org.apache.solr.client.solrj.impl.PreemptiveBasicAuthClientBuilderFactory\""
+		}
 	}
 	GinkgoLogr.Info(toolOpts)
 
-	command := []string{
-		"solr",
-		"api",
-		"-verbose",
-		"-" + strings.ToLower(httpMethod),
-		fmt.Sprintf(
-			"\"%s://%s%s%s%s\"",
-			solrCloud.UrlScheme(false),
-			hostname,
-			solrCloud.NodePortSuffix(false),
-			apiPath,
-			queryParamsString),
+	solrUrl := fmt.Sprintf(
+		"\"%s://%s%s%s%s\"",
+		solrCloud.UrlScheme(false),
+		hostname,
+		solrCloud.NodePortSuffix(false),
+		apiPath,
+		queryParamsString)
+
+	var command []string
+	if isSolr10 {
+		command = []string{"solr", "api", "--solr-url", solrUrl, "-v"}
+		if credentials != "" {
+			command = append(command, "--credentials", credentials)
+		}
+	} else {
+		command = []string{"solr", "api", "-verbose", "-" + strings.ToLower(httpMethod), solrUrl}
 	}
 	if toolOpts != "" {
 		commandString := fmt.Sprintf("%s %s", toolOpts, strings.Join(command, " "))

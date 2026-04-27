@@ -32,7 +32,9 @@ Still required but renamed sysprop:
 | Modules | Added `SOLR_MODULES` env var; skip contrib sharedLib paths for Solr 10 |
 | hostPort sysprop | Skip `-DhostPort` for Solr 10 (no longer needed) |
 | zkcli.sh (TLS) | `setUrlSchemeClusterPropCmd` uses `solr zk cp` for Solr 10 |
-| E2E tests | `callSolrApiInPod` uses `--solr-url` flag for Solr 10 |
+| Secure probes | `useSecureProbe` uses `solr api --solr-url` for Solr 10 (was `-get`) |
+| E2E test API call | `callSolrApiInPod` uses `--solr-url` flag for Solr 10 |
+| E2E basic auth | `callSolrApiInPod` uses native `--credentials user:pass` for Solr 10 instead of deprecated `JAVA_TOOL_OPTIONS=-Dbasicauth=...` |
 
 ## Version detection
 
@@ -42,17 +44,23 @@ Still required but renamed sysprop:
 
 - **Prometheus Exporter**: `DefaultPrometheusExporterEntrypoint` references `/opt/solr/contrib/prometheus-exporter/bin/solr-exporter` which doesn't exist in Solr 10. The exporter was removed; metrics should be scraped directly from Solr's built-in metrics endpoint. See issue #820.
 - **Deprecation warning**: `SOLR_HOST` env var triggers `"You are passing in deprecated system property host"` in Solr 10 logs. Harmless but noisy. Could be resolved by only setting `SOLR_HOST_ADVERTISE` for Solr 10.
-- **More E2E coverage**: Only the basic test (start + create collection) has been verified. Scaling, TLS, backups, and security tests need validation.
-- **`solr api` auth**: The Solr 10 CLI has native `--credentials` support. The current test workaround using `JAVA_TOOL_OPTIONS` may not work; tests with basic auth enabled will likely need updating.
 - **Solr 10.1.0 targeting**: HoustonPutman suggested targeting 10.1.0 due to `-c` flag removal in `solr create`. This mainly affects the CLI, not the operator's API-based approach.
 
-## E2E test results
+## E2E test results (Solr 10.0.0)
 
-| Solr Version | Basic Test | Notes |
-|---|---|---|
-| 9.8.0 | PASS | Baseline verification |
-| 10.0.0 (before changes) | FAIL | `SolrException: Unknown configuration parameter genericCoreNodeNames` |
-| 10.0.0 (after changes) | PASS | 1 Passed, 0 Failed, 62s |
+| Test suite | Result |
+|---|---|
+| Basic | PASS |
+| Scale Down / Scale Up (with replica migration) | PASS |
+| Security JSON (Provided + Bootstrapped) | PASS |
+| TLS - Secrets (No Client TLS, Client TLS, ClientAuth Need/Want, CheckPeerName, VerifyClientHostname) | PASS |
+| TLS - Mounted Dir (ClientAuth - Want) | PASS |
+| Backups (Local Directory - Recurring + Single) | PASS |
+| Ingress (addressability change) | PASS |
+| Rolling Upgrades (Managed Update) | PASS |
+| Prometheus Exporter | FAIL (expected — exporter removed in Solr 10, see issue #820) |
+
+Baseline 9.8.0 Basic test also verified PASS.
 
 ## Upstream context
 

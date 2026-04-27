@@ -477,6 +477,9 @@ func callSolrApiInPod(ctx context.Context, solrCloud *solrv1beta1.SolrCloud, htt
 		queryParamsString = "?" + queryParamsString
 	}
 
+	isSolr10 := util.IsSolr10OrLater(strings.Split(solrImage+":", ":")[1])
+
+	credentials := ""
 	toolOpts := ""
 	if solrCloud.Spec.SolrSecurity != nil && solrCloud.Spec.SolrSecurity.AuthenticationType == solrv1beta1.Basic {
 		basicAuthSecretName := solrCloud.BasicAuthSecretName()
@@ -484,10 +487,12 @@ func callSolrApiInPod(ctx context.Context, solrCloud *solrv1beta1.SolrCloud, htt
 		if err = k8sClient.Get(ctx, resourceKey(solrCloud, basicAuthSecretName), basicAuthSecret); err != nil {
 			return "", err
 		}
-		toolOpts =
-			"JAVA_TOOL_OPTIONS=\"-Dbasicauth=" +
-				string(basicAuthSecret.Data[corev1.BasicAuthUsernameKey]) + ":" + string(basicAuthSecret.Data[corev1.BasicAuthPasswordKey]) +
-				" -Dsolr.httpclient.builder.factory=org.apache.solr.client.solrj.impl.PreemptiveBasicAuthClientBuilderFactory\""
+		credentials = string(basicAuthSecret.Data[corev1.BasicAuthUsernameKey]) + ":" + string(basicAuthSecret.Data[corev1.BasicAuthPasswordKey])
+		if !isSolr10 {
+			toolOpts =
+				"JAVA_TOOL_OPTIONS=\"-Dbasicauth=" + credentials +
+					" -Dsolr.httpclient.builder.factory=org.apache.solr.client.solrj.impl.PreemptiveBasicAuthClientBuilderFactory\""
+		}
 	}
 	GinkgoLogr.Info(toolOpts)
 
@@ -500,9 +505,11 @@ func callSolrApiInPod(ctx context.Context, solrCloud *solrv1beta1.SolrCloud, htt
 		queryParamsString)
 
 	var command []string
-	if util.IsSolr10OrLater(strings.Split(solrImage+":", ":")[1]) {
-		// Solr 10+ uses a different CLI syntax: solr api -s <url> -v
+	if isSolr10 {
 		command = []string{"solr", "api", "--solr-url", solrUrl, "-v"}
+		if credentials != "" {
+			command = append(command, "--credentials", credentials)
+		}
 	} else {
 		command = []string{"solr", "api", "-verbose", "-" + strings.ToLower(httpMethod), solrUrl}
 	}

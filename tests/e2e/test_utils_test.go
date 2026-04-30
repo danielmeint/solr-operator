@@ -477,7 +477,7 @@ func callSolrApiInPod(ctx context.Context, solrCloud *solrv1beta1.SolrCloud, htt
 		queryParamsString = "?" + queryParamsString
 	}
 
-	isSolr10 := solrv1beta1.IsSolr10OrLater(strings.Split(solrImage+":", ":")[1])
+	isSolr10 := solrCloud.IsSolr10OrLater()
 	if isSolr10 {
 		// Solr 10's `solr api` only supports GET (--solr-url URL). The legacy
 		// `-get/-post URL` flags were removed. Fail loudly if a non-GET caller
@@ -587,7 +587,8 @@ func generateBaseSolrCloud(replicas int) *solrv1beta1.SolrCloud {
 			Namespace: testNamespace(),
 		},
 		Spec: solrv1beta1.SolrCloudSpec{
-			Replicas: pointer.Int32(int32(replicas)),
+			Replicas:    pointer.Int32(int32(replicas)),
+			SolrMajorVersion: parseMajorVersion(strings.Split(solrImage+":", ":")[1]),
 			// Set the image to reflect the inputs given via EnvVars.
 			SolrImage: &solrv1beta1.ContainerImage{
 				Repository: strings.Split(solrImage, ":")[0],
@@ -615,6 +616,20 @@ func generateBaseSolrCloud(replicas int) *solrv1beta1.SolrCloud {
 			},
 		},
 	}
+}
+
+// parseMajorVersion extracts the major version from a tag like "10.0.0" or "9.10.0".
+// E2E test images always use well-formed semver tags.
+func parseMajorVersion(tag string) int {
+	parts := strings.SplitN(tag, ".", 2)
+	if len(parts) == 0 {
+		return 9
+	}
+	v, err := strconv.Atoi(parts[0])
+	if err != nil {
+		return 9
+	}
+	return v
 }
 
 // Uses default password from docs : SolrRocks

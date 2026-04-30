@@ -227,37 +227,15 @@ func TestGenerateSolrXMLStringForCloud(t *testing.T) {
 	assert.Containsf(t, GenerateSolrXMLStringForCloud(solrCloud), "<str name=\"sharedLib\">${solr.sharedLib:},/ext/lib1,/ext/lib2</str>", "Wrong sharedLib xml for a cloud with a just additionalLibs")
 }
 
-func TestSolrMajorVersion(t *testing.T) {
-	assert.Equal(t, 9, solr.SolrMajorVersion("9.10.0"), "Standard 9.x version")
-	assert.Equal(t, 10, solr.SolrMajorVersion("10.0.0"), "Standard 10.x version")
-	assert.Equal(t, 10, solr.SolrMajorVersion("10.1.0"), "Solr 10.1")
-	assert.Equal(t, 11, solr.SolrMajorVersion("11.0.0"), "Future major version")
-	assert.Equal(t, 10, solr.SolrMajorVersion("10.0.0-SNAPSHOT"), "Snapshot version")
-	assert.Equal(t, 10, solr.SolrMajorVersion("v10.0.0"), "Tag with 'v' prefix")
-	assert.Equal(t, 0, solr.SolrMajorVersion("latest"), "Unparseable tag 'latest'")
-	assert.Equal(t, 0, solr.SolrMajorVersion("nightly"), "Unparseable tag 'nightly'")
-	assert.Equal(t, 0, solr.SolrMajorVersion(""), "Empty tag")
-}
-
 func TestIsSolr10OrLater(t *testing.T) {
-	assert.False(t, solr.IsSolr10OrLater("9.10.0"), "9.10.0 is not Solr 10+")
-	assert.False(t, solr.IsSolr10OrLater("9.0.0"), "9.0.0 is not Solr 10+")
-	assert.True(t, solr.IsSolr10OrLater("10.0.0"), "10.0.0 is Solr 10+")
-	assert.True(t, solr.IsSolr10OrLater("10.1.0"), "10.1.0 is Solr 10+")
-	assert.True(t, solr.IsSolr10OrLater("11.0.0"), "11.0.0 is Solr 10+")
-	assert.True(t, solr.IsSolr10OrLater("10.0.0-SNAPSHOT"), "10.0.0-SNAPSHOT is Solr 10+")
-	assert.False(t, solr.IsSolr10OrLater("latest"), "Unparseable defaults to pre-10")
-	assert.False(t, solr.IsSolr10OrLater(""), "Empty defaults to pre-10")
-}
+	assert.False(t, (&solr.SolrCloud{}).IsSolr10OrLater(), "zero value → pre-10")
+	assert.False(t, (&solr.SolrCloud{Spec: solr.SolrCloudSpec{SolrMajorVersion: 8}}).IsSolr10OrLater(), "8 → pre-10")
+	assert.False(t, (&solr.SolrCloud{Spec: solr.SolrCloudSpec{SolrMajorVersion: 9}}).IsSolr10OrLater(), "9 → pre-10")
+	assert.True(t, (&solr.SolrCloud{Spec: solr.SolrCloudSpec{SolrMajorVersion: 10}}).IsSolr10OrLater(), "10 → Solr 10+")
 
-func TestSolrCloud_IsSolr10OrLater(t *testing.T) {
-	assert.False(t, (&solr.SolrCloud{}).IsSolr10OrLater(), "nil SolrImage defaults to pre-10")
-
-	cloud9 := &solr.SolrCloud{Spec: solr.SolrCloudSpec{SolrImage: &solr.ContainerImage{Tag: "9.10.0"}}}
-	assert.False(t, cloud9.IsSolr10OrLater(), "SolrCloud with 9.10.0 tag is pre-10")
-
-	cloud10 := &solr.SolrCloud{Spec: solr.SolrCloudSpec{SolrImage: &solr.ContainerImage{Tag: "10.0.0"}}}
-	assert.True(t, cloud10.IsSolr10OrLater(), "SolrCloud with 10.0.0 tag is Solr 10+")
+	// Custom image tag doesn't affect the outcome
+	cloud := &solr.SolrCloud{Spec: solr.SolrCloudSpec{SolrMajorVersion: 8, SolrImage: &solr.ContainerImage{Tag: "261.162.1"}}}
+	assert.False(t, cloud.IsSolr10OrLater(), "solrMajorVersion=8 with custom tag '261.162.1'")
 }
 
 func TestGenerateAdditionalLibXMLPartSolr10(t *testing.T) {
@@ -279,6 +257,7 @@ func TestGenerateAdditionalLibXMLPartSolr10(t *testing.T) {
 func TestGenerateSolrXMLStringForCloudSolr10(t *testing.T) {
 	solrCloud := &solr.SolrCloud{
 		Spec: solr.SolrCloudSpec{
+			SolrMajorVersion: 10,
 			SolrImage: &solr.ContainerImage{
 				Repository: "library/solr",
 				Tag:        "10.0.0",
@@ -310,6 +289,7 @@ func TestGenerateSolrXMLStringForCloudSolr10(t *testing.T) {
 func TestGenerateSolrXMLStringForCloudSolr9(t *testing.T) {
 	solrCloud := &solr.SolrCloud{
 		Spec: solr.SolrCloudSpec{
+			SolrMajorVersion: 9,
 			SolrImage: &solr.ContainerImage{
 				Repository: "library/solr",
 				Tag:        "9.10.0",
@@ -343,7 +323,8 @@ func newProbeForTest() *corev1.Probe {
 func TestUseSecureProbeForSolr9(t *testing.T) {
 	solrCloud := &solr.SolrCloud{
 		Spec: solr.SolrCloudSpec{
-			SolrImage: &solr.ContainerImage{Repository: "library/solr", Tag: "9.10.0"},
+			SolrMajorVersion: 9,
+			SolrImage:   &solr.ContainerImage{Repository: "library/solr", Tag: "9.10.0"},
 		},
 	}
 	probe := newProbeForTest()
@@ -360,7 +341,8 @@ func TestUseSecureProbeForSolr9(t *testing.T) {
 func TestUseSecureProbeForSolr10(t *testing.T) {
 	solrCloud := &solr.SolrCloud{
 		Spec: solr.SolrCloudSpec{
-			SolrImage: &solr.ContainerImage{Repository: "library/solr", Tag: "10.0.0"},
+			SolrMajorVersion: 10,
+			SolrImage:   &solr.ContainerImage{Repository: "library/solr", Tag: "10.0.0"},
 		},
 	}
 	probe := newProbeForTest()
@@ -386,8 +368,14 @@ func TestSetUrlSchemeClusterPropCmd(t *testing.T) {
 }
 
 func newSolrCloudForTest(tag string, modules []string) *solr.SolrCloud {
+	// Test tags are always well-formed (e.g. "10.0.0", "9.10.0")
+	solrVersion := 9
+	if len(tag) > 0 && tag[0] == '1' && len(tag) > 1 && tag[1] == '0' {
+		solrVersion = 10
+	}
 	cloud := &solr.SolrCloud{
 		Spec: solr.SolrCloudSpec{
+			SolrMajorVersion: solrVersion,
 			SolrImage:   &solr.ContainerImage{Repository: "library/solr", Tag: tag},
 			SolrModules: modules,
 		},

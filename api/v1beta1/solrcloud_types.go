@@ -74,6 +74,15 @@ type SolrCloudSpec struct {
 	// +optional
 	SolrImage *ContainerImage `json:"solrImage,omitempty"`
 
+	// Solr major version (8, 9, or 10). Determines version-specific operator
+	// behavior such as solr.xml format, CLI flags, and env vars.
+	// Required — image tags alone are not reliably parseable.
+	//
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Minimum=8
+	// +kubebuilder:validation:Maximum=10
+	SolrMajorVersion int `json:"solrMajorVersion"`
+
 	// Customize how the cloud data is stored.
 	// If neither "persistent" or "ephemeral" is provided, then ephemeral storage will be used by default.
 	//
@@ -1327,37 +1336,9 @@ func (zkInfo ZookeeperConnectionInfo) ZkConnectionString() string {
 	return zkInfo.InternalConnectionString + zkInfo.ChRoot
 }
 
-// SolrMajorVersion extracts the major version number from a Solr image tag.
-// Returns 0 if the tag cannot be parsed (e.g. "latest", "nightly", custom tags).
-func SolrMajorVersion(imageTag string) int {
-	tag := strings.TrimPrefix(imageTag, "v")
-	if idx := strings.Index(tag, "-"); idx >= 0 {
-		tag = tag[:idx]
-	}
-	major := tag
-	if idx := strings.Index(tag, "."); idx >= 0 {
-		major = tag[:idx]
-	}
-	v, err := strconv.Atoi(major)
-	if err != nil {
-		return 0
-	}
-	return v
-}
-
-// IsSolr10OrLater returns true if the given image tag represents Solr 10.0 or later.
-// Unparseable tags (e.g. "latest") are treated as pre-10 for backwards compatibility.
-func IsSolr10OrLater(imageTag string) bool {
-	return SolrMajorVersion(imageTag) >= 10
-}
-
-// IsSolr10OrLater returns true if this SolrCloud's image tag represents Solr 10.0 or later.
-// A nil SolrImage is treated as pre-10.
+// IsSolr10OrLater returns true if this SolrCloud targets Solr 10+.
 func (sc *SolrCloud) IsSolr10OrLater() bool {
-	if sc.Spec.SolrImage == nil {
-		return false
-	}
-	return IsSolr10OrLater(sc.Spec.SolrImage.Tag)
+	return sc.Spec.SolrMajorVersion >= 10
 }
 
 // UsesHeadlessService returns whether the given solrCloud requires a headless service to be created for it.

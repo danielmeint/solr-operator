@@ -126,6 +126,11 @@ _Note that the Helm chart version does not contain a `v` prefix, which the downl
 ## Upgrade Warnings and Notes
 
 ### v0.10.0
+- **`SolrCloud.spec.solrMajorVersion` is now required**
+  A new required field `spec.solrMajorVersion` (int, 8–10) drives version-specific operator behavior for Solr 10 support.
+  Existing SolrCloud CRs must add this field (e.g. `solrMajorVersion: 9`) before upgrading the operator; CRD validation rejects CRs that omit it.
+  The `helm/solr` chart exposes a new `solrMajorVersion` value (default `9`) that must be bumped to `10` when running a Solr 10.x image.
+
 - **Logging now defaults to JSON format**
   The new default for CLI flag `--zap-devel` is now `false`, causing log encoding to be `json` and log level to be `info`.
   There is a new helm value `development` that can be set to `true` to switch to `console` encoding and `debug` level
